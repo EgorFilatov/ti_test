@@ -199,6 +199,17 @@ uint16_t sqrt_my (uint32_t L)
 
 
 
+
+
+
+
+
+
+
+
+
+
+
 /* Обработка показаний ацп */
 void voltage_processing (uint8_t phase)
 {
@@ -315,7 +326,7 @@ void current_calculation (uint8_t phase)
 
   if (freq[phase + 3] > FREQ_LIM_LOW && freq[phase + 3] < FREQ_LIM_UPP)
     {
-      i_rms[phase] = (sqrt_my((i_mom_2_sum_curr[phase] + i_mom_2_sum_prev[phase]) / (num_of_meas_curr[phase + 3] + num_of_meas_prev[phase + 3]))) * 0.00629;
+      i_rms[phase] = (sqrt_my((i_mom_2_sum_curr[phase] + i_mom_2_sum_prev[phase]) / (num_of_meas_curr[phase + 3] + num_of_meas_prev[phase + 3]))) * 0.00628;
       freq_filt[phase + 3] = freq[phase + 3];
     }
 
