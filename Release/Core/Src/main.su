@@ -1,0 +1,9 @@
+../Core/Src/main.c:123:10:sqrt_my	24	static
+../Core/Src/main.c:199:6:adc_processing	0	static
+../Core/Src/main.c:251:6:calculation	32	static
+../Core/Src/main.c:283:1:freq_filtering_1	24	static
+../Core/Src/main.c:391:6:SystemClock_Config	80	static
+../Core/Src/main.c:315:5:main	88	static
+../Core/Src/main.c:673:6:HAL_ADC_ConvCpltCallback	24	static
+../Core/Src/main.c:705:6:HAL_TIM_IC_CaptureCallback	16	static
+../Core/Src/main.c:728:6:Error_Handler	0	static

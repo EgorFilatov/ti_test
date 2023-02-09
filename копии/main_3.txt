@@ -24,6 +24,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
+#include <math.h>
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -34,10 +36,9 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define VOLTAGE_COEFFICIENT 0.2725 //Коэффициент напряжения
-#define CURRENT_COEFFICIENT 0.00629 //Коэффициент тока
 #define MEASUREMENT_FREQUENCY 4000 //Частота измерений
 #define ZERO_AXIS 2030 //Средняя точка
-#define DEAD_ZONE_SQRT 400 //Квадрат мертвой зоны около опорного напряжения
+#define DEAD_ZONE_2 400 //Квадрат мертвой зоны около опорного напряжения
 #define FREQ_LIM_UPP 60 //Верхняя граница чувствительности по частоте Гц
 #define FREQ_LIM_LOW 40 //Нижняя граница чувствительности по частоте Гц
 /* USER CODE END PD */
@@ -55,41 +56,44 @@ TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim15;
 
 /* USER CODE BEGIN PV */
+uint8_t settings_flag = 0; //Флаг настройки средней точки
+uint8_t zero_axis[6] = { 0 };
+
 uint16_t adc[6] = { 0 }; //Показания АЦП
-
-uint8_t adc_sqrt[6] = { 0 }; //Квадрат мгновенного значения ацп
-uint32_t summ_adc_sqrt[3] = { 0 }; //Сумма квадратов мгновенных значений ацп
-
-uint8_t adc_diff_sqrt[3] = { 0 }; //Квадрат разности мгновенных значения ацп
-int32_t summ_adc_diff_sqrt[3] = { 0 }; //Сумма квадратов разности мгновенных значений ацп
-
-uint32_t saved_summ_adc_sqrt[3] = { 0 }; //Сохраненная сумма квадратов мгновенных значений ацп
-int32_t saved_summ_adc_diff_sqrt[3] = { 0 }; //Сохраненная сумма квадратов разности мгновенных значений напряжения фаз
 
 /* Расчет действующего значения напряжения */
 float u_rms[3] = { 0.0 }; //Действующее значение напряжения
 
-uint32_t prev_saved_summ_adc_sqrt[3] = { 0 }; //Предыдущая сумма квадратов мгновенных значений напряжения
+uint32_t u_mom_2[3] = { 0 }; //Квадрат мгновенного значения напряжения
+uint32_t u_mom_2_sum[3] = { 0 }; //Сумма квадратов мгновенных значений напряжения
+uint32_t u_mom_2_sum_curr[3] = { 0 }; //Текущая сумма квадратов мгновенных значений напряжения
+uint32_t u_mom_2_sum_prev[3] = { 0 }; //Предыдущая сумма квадратов мгновенных значений напряжения
 
 /* Расчет действующего значения тока */
 float i_rms[3] = { 0.0 }; //Действующее значение тока
 
+uint32_t i_mom_2[3] = { 0 }; //Квадрат мгновенного значения тока
+uint32_t i_mom_2_sum[3] = { 0 }; //Сумма квадратов мгновенных значений тока
 uint32_t i_mom_2_sum_curr[3] = { 0 }; //Текущая сумма квадратов мгновенных значений тока
 uint32_t i_mom_2_sum_prev[3] = { 0 }; //Предыдущая сумма квадратов мгновенных значений тока
 
 /* Расчет действующего линейного значения напряжения фаз */
 float u_l[3] = { 0.0, 0.0, 0.0 }; //Действующее линейное значение напряжение фазы
 
-int32_t prev_saved_summ_adc_diff_sqrt[3] = { 0 }; //Предыдущая сумма квадратов разности мгновенных значений напряжения фаз
+int32_t u_mom_diff_2[3] = { 0 }; //Квадрат разности мгновенных значений напряжения фаз
+int32_t u_mom_diff_2_sum[3] = { 0 }; //Сумма квадратов разности мгновенных значений напряжения фаз
+int32_t u_mom_diff_2_sum_curr[3] = { 0 }; //Текущая сумма квадратов разности мгновенных значений напряжения фаз
+int32_t u_mom_diff_2_sum_prev[3] = { 0 }; //Предыдущая сумма квадратов разности мгновенных значений напряжения фаз
 
 uint16_t num_of_meas[6] = { 0 }; //Количество измерений
-uint16_t saved_num_of_meas[6] = { 0 }; //Текущее количество измерений
-uint16_t prev_saved_num_of_meas[6] = { 0 }; //Предыдущее количество измерений
+uint16_t num_of_meas_curr[6] = { 0 }; //Текущее количество измерений
+uint16_t num_of_meas_prev[6] = { 0 }; //Предыдущее количество измерений
 
-uint8_t flag_dead_zone = 0; //Флаг перехода измерения в мертвую зону
+uint8_t dead_zone_flag = 0; //Флаг перехода измерения в мертвую зону
 
 /* Расчет частоты */
-uint8_t freq[6] = { 0 }; //Частота
+float freq[6] = { 0 }; //Частота
+float freq_filt[6] = { 0 }; //Частота отфильтрованная по верхней и нижней границе чувствительности
 
 uint16_t freq_num_of_meas[6] = { 0 }; //Количество измерений для измерения частоты
 uint16_t freq_num_of_meas_curr[6] = { 0 }; //Текущее количество измерений для измерения частоты
@@ -196,88 +200,154 @@ uint16_t sqrt_my (uint32_t L)
 
 
 /* Обработка показаний ацп */
-void adc_processing (uint8_t phase)
+void voltage_processing (uint8_t phase)
 {
   /* Если измерение больше запрещенной зоны */
-  if (adc_sqrt[phase] > DEAD_ZONE_SQRT)
+  if (u_mom_2[phase] > DEAD_ZONE_2)
     {
-      /* Был ли выход из запрещенной зоны */
-      if (flag_dead_zone & (1 << phase))
+      /* Был ли переход через запрещенную зону */
+      if (dead_zone_flag & (1 << phase))
 	{
-	  flag_dead_zone &= ~(1 << phase); //Сбрасываем флаг запрещенной зоны
+	  dead_zone_flag &= ~(1 << phase); //сбрасываем флаг запрещенной зоны
 
 	  /* Сохраняем вычисленные значения */
-	  saved_summ_adc_sqrt[phase] = summ_adc_sqrt[phase];
+	  u_mom_2_sum_curr[phase] = u_mom_2_sum[phase];
+	  u_mom_diff_2_sum_curr[phase] = u_mom_diff_2_sum[phase];
 	  freq_num_of_meas_curr[phase] = freq_num_of_meas[phase];
-	  saved_num_of_meas[phase] = num_of_meas[phase];
-	  if (phase < 3)
-	    {
-	      saved_summ_adc_diff_sqrt[phase] = summ_adc_diff_sqrt[phase];
-	    }
+	  num_of_meas_curr[phase] = num_of_meas[phase];
 
 	  /* Обнуляем значения вычисленные значения */
-	  summ_adc_sqrt[phase] = 0;
+	  u_mom_2_sum[phase] = 0;
+	  u_mom_diff_2_sum[phase] = 0;
 	  num_of_meas[phase] = 0;
 	  freq_num_of_meas[phase] = 0;
-	  if (phase < 3)
-	    {
-	      summ_adc_diff_sqrt[phase] = 0;
-	    }
 
 	  flag_calc |= (1 << phase); //Разрешаем расчет
 	}
 
-      /* Выхода из запрещенной зоны небыло */
+      /* Перехода через запрещенную зону небыло */
       else
 	{
+	  u_mom_diff_2_sum[phase] += u_mom_diff_2[phase];
+	  u_mom_2_sum[phase] += u_mom_2[phase];
 	  ++num_of_meas[phase];
-	  summ_adc_sqrt[phase] += adc_sqrt[phase];
-	  if (phase < 3)
-	    {
-	      summ_adc_diff_sqrt[phase] += adc_diff_sqrt[phase];
-	    }
 	}
     }
   /* Если измерение меньше запрещенной зоны */
   else
     {
-      flag_dead_zone |= (1 << phase);
+      dead_zone_flag |= (1 << phase);
       ++freq_num_of_meas[phase];
     }
 }
 
 
-/* Расчет фазных и линейных напряжений */
-void calculation (uint8_t phase)
+void current_processing (uint8_t phase)
 {
-  freq[phase] = MEASUREMENT_FREQUENCY / (freq_num_of_meas_curr[phase] + saved_num_of_meas[phase]);
+  /* Если измерение больше запрещенной зоны */
+  if (i_mom_2[phase] > DEAD_ZONE_2)
+    {
+      /* Если был переход через запрещенную зону */
+      if (dead_zone_flag & (1 << (phase + 3)))
+	{
+	  dead_zone_flag &= ~(1 << (phase + 3));
+	  /* Сохраняем вычисленные значения и разрешаем расчет */
+	  if (!(flag_calc & (1 << (phase + 3))))
+	    {
+	      flag_calc |= (1 << (phase + 3));
+
+	      i_mom_2_sum_curr[phase] = i_mom_2_sum[phase];
+	      freq_num_of_meas_curr[phase + 3] = freq_num_of_meas[phase + 3];
+	      num_of_meas_curr[phase + 3] = num_of_meas[phase + 3];
+	    }
+	  /* Обнуляем значения */
+	  i_mom_2_sum[phase] = 0;
+	  num_of_meas[phase + 3] = 0;
+	  freq_num_of_meas[phase + 3] = 0;
+	}
+      /* Если не было перехода через запрещенную зону */
+      else
+	{
+	  i_mom_2_sum[phase] += i_mom_2[phase];
+	  ++num_of_meas[phase + 3];
+	}
+    }
+  /* Если измерение меньше запрещенной зоны */
+  else
+    {
+      dead_zone_flag |= (1 << (phase + 3));
+      ++freq_num_of_meas[phase + 3];
+    }
+}
+
+
+/* Расчет фазных и линейных напряжений */
+void voltage_calculation (uint8_t phase)
+{
+
+  freq[phase] = MEASUREMENT_FREQUENCY / (float) (freq_num_of_meas_curr[phase] + num_of_meas_curr[phase]);
 
   if (freq[phase] > FREQ_LIM_LOW && freq[phase] < FREQ_LIM_UPP)
     {
-      if (phase < 3)
-	{
-	  u_rms[phase] = (sqrt_my((saved_summ_adc_sqrt[phase] + prev_saved_summ_adc_sqrt[phase]) / (saved_num_of_meas[phase] + prev_saved_num_of_meas[phase]))) * VOLTAGE_COEFFICIENT;
-	  u_l[phase] = (sqrt_my((saved_summ_adc_diff_sqrt[phase] + prev_saved_summ_adc_diff_sqrt[phase]) / (saved_num_of_meas[phase] + prev_saved_num_of_meas[phase]))) * VOLTAGE_COEFFICIENT;
-	}
-      else
-	{
-	  i_rms[phase] = (sqrt_my((i_mom_2_sum_curr[phase] + i_mom_2_sum_prev[phase]) / (saved_num_of_meas[phase + 3] + prev_saved_num_of_meas[phase + 3]))) * CURRENT_COEFFICIENT;
-	}
+      u_rms[phase] = (sqrt_my((u_mom_2_sum_curr[phase] + u_mom_2_sum_prev[phase]) / (num_of_meas_curr[phase] + num_of_meas_prev[phase]))) * VOLTAGE_COEFFICIENT;
+      u_l[phase] = (sqrt_my((u_mom_diff_2_sum_curr[phase] + u_mom_diff_2_sum_prev[phase]) / (num_of_meas_curr[phase] + num_of_meas_prev[phase]))) * VOLTAGE_COEFFICIENT;
+      freq_filt[phase] = freq[phase];
     }
 
-  prev_saved_summ_adc_sqrt[phase] = saved_summ_adc_sqrt[phase];
-  prev_saved_num_of_meas[phase] = saved_num_of_meas[phase];
-  if (phase < 3)
-    {
-      prev_saved_summ_adc_diff_sqrt[phase] = saved_summ_adc_diff_sqrt[phase];
-    }
-
+  u_mom_2_sum_prev[phase] = u_mom_2_sum_curr[phase];
+  u_mom_diff_2_sum_prev[phase] = u_mom_diff_2_sum_curr[phase];
+  num_of_meas_prev[phase] = num_of_meas_curr[phase];
 
   flag_calc &= ~(1 << phase);
 }
 
 
+/* Расчет действующего значения тока */
+void current_calculation (uint8_t phase)
+{
 
+  freq[phase + 3] = MEASUREMENT_FREQUENCY / (float) (freq_num_of_meas_curr[phase + 3] + num_of_meas_curr[phase + 3]);
+
+  if (freq[phase + 3] > FREQ_LIM_LOW && freq[phase + 3] < FREQ_LIM_UPP)
+    {
+      i_rms[phase] = (sqrt_my((i_mom_2_sum_curr[phase] + i_mom_2_sum_prev[phase]) / (num_of_meas_curr[phase + 3] + num_of_meas_prev[phase + 3]))) * 0.00629;
+      freq_filt[phase + 3] = freq[phase + 3];
+    }
+
+  i_mom_2_sum_prev[phase] = i_mom_2_sum_curr[phase];
+  num_of_meas_prev[phase + 3] = num_of_meas_curr[phase + 3];
+
+  flag_calc &= ~(1 << (phase + 3));
+}
+
+
+/* Фильтрация частоты */
+void
+freq_filtering (uint8_t phase)
+{
+  if (freq_hits_num == 0)
+    {
+      prev_freq[phase] = freq_filt[phase];
+      ++freq_hits_num;
+    }
+  if (freq_filt[phase] == prev_freq[phase] && freq_hits_num != 0)
+    {
+      prev_freq[phase] = freq_filt[phase];
+      ++freq_hits_num;
+    }
+
+  if (freq_filt[phase] != prev_freq[phase] && freq_hits_num != 0)
+    {
+      prev_freq[phase] = freq_filt[phase];
+      freq_hits_num = 0;
+    }
+
+  if (freq_hits_num == 1050)
+    {
+      freq_view[phase] = prev_freq[phase];
+      freq_hits_num = 0;
+    }
+}
 
 void
 freq_filtering_1 (uint8_t phase)
@@ -359,22 +429,22 @@ int main(void)
     {
       if (flag_calc & (1 << 0) && flag_calc & (1 << 1)  && flag_calc & (1 << 2))
       	{
-	  calculation(0);
-	  calculation(1);
-	  calculation(2);
+	  voltage_calculation(0);
+	  voltage_calculation(1);
+	  voltage_calculation(2);
       	}
 
       if (flag_calc & (1 << 3))
 	{
-	  calculation (3);
+	  current_calculation (0);
 	}
       if (flag_calc & (1 << 4))
       	{
-	  calculation (4);
+      	  current_calculation (1);
       	}
       if (flag_calc & (1 << 5))
       	{
-	  calculation (5);
+      	  current_calculation (2);
       	}
 
     /* USER CODE END WHILE */
@@ -672,26 +742,33 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 void HAL_ADC_ConvCpltCallback (ADC_HandleTypeDef *hadc)
 {
-  /* Вычисление квадрата мгновенного значения ацп */
-  adc_sqrt[0] = (adc[0] - ZERO_AXIS) * (adc[0] - ZERO_AXIS);
-  adc_sqrt[1] = (adc[1] - ZERO_AXIS) * (adc[1] - ZERO_AXIS);
-  adc_sqrt[2] = (adc[2] - ZERO_AXIS) * (adc[2] - ZERO_AXIS);
-  adc_sqrt[3] = (adc[3] - (ZERO_AXIS + 4)) * (adc[3] - (ZERO_AXIS + 4));
-  adc_sqrt[4] = (adc[4] - (ZERO_AXIS + 7)) * (adc[4] - (ZERO_AXIS + 7));
-  adc_sqrt[5] = (adc[5] - (ZERO_AXIS - 5)) * (adc[5] - (ZERO_AXIS - 5));
+  u_mom_2[0] = (adc[0] - ZERO_AXIS) * (adc[0] - ZERO_AXIS); //Вычисление квадрата мгновенного напряжения
+  u_mom_2[1] = (adc[1] - ZERO_AXIS) * (adc[1] - ZERO_AXIS);//Вычисление квадрата мгновенного напряжения
+  u_mom_2[2] = (adc[2] - ZERO_AXIS) * (adc[2] - ZERO_AXIS);//Вычисление квадрата мгновенного напряжения
 
-  /* Вычисление квадрата разности мгновенных значения ацп */
-  adc_diff_sqrt[0] = (adc[0] - adc[1]) * (adc[0] - adc[1]);
-  adc_diff_sqrt[1] = (adc[1] - adc[2]) * (adc[1] - adc[2]);
-  adc_diff_sqrt[2] = (adc[2] - adc[0]) * (adc[2] - adc[0]);
+  u_mom_diff_2[0] = (adc[0] - adc[1]) * (adc[0] - adc[1]); //Вычисление квадрата разности мгновенных напряжений фаз
+  u_mom_diff_2[1] = (adc[1] - adc[2]) * (adc[1] - adc[2]);//Вычисление квадрата разности мгновенных напряжений фаз
+  u_mom_diff_2[2] = (adc[2] - adc[0]) * (adc[2] - adc[0]);//Вычисление квадрата разности мгновенных напряжений фаз
 
-  /* Обработка вычисленных значений */
-  adc_processing (0);
-  adc_processing (1);
-  adc_processing (2);
-  adc_processing (3);
-  adc_processing (4);
-  adc_processing (5);
+  voltage_processing (0); //Обработка вычисленных значений напряжения
+  voltage_processing (1);//Обработка вычисленных значений напряжения
+  voltage_processing (2);//Обработка вычисленных значений напряжения
+
+
+
+
+
+  /* Вычисление квадратов мгновенного тока */
+  i_mom_2[0] = (adc[3] - (ZERO_AXIS + 4)) * (adc[3] - (ZERO_AXIS + 4));
+  i_mom_2[1] = (adc[4] - (ZERO_AXIS + 7)) * (adc[4] - (ZERO_AXIS + 7));
+  i_mom_2[2] = (adc[5] - (ZERO_AXIS - 5)) * (adc[5] - (ZERO_AXIS - 5));
+
+
+
+  /* Обработка вычисленных значений тока */
+  current_processing (0);
+  current_processing (1);
+  current_processing (2);
 
   /* Запуск нового измерения */
   HAL_ADC_Start_DMA (hadc, (uint32_t*) adc, 6);
