@@ -57,25 +57,26 @@ TIM_HandleTypeDef htim15;
 /* USER CODE BEGIN PV */
 uint16_t adc[6] = { 0 }; //Показания АЦП
 
-uint32_t adc_sqrt[6] = { 0 }; //Квадрат мгновенного значения ацп
-uint32_t summ_adc_sqrt[6] = { 0 }; //Сумма квадратов мгновенных значений ацп
+uint8_t adc_sqrt[6] = { 0 }; //Квадрат мгновенного значения ацп
+uint32_t summ_adc_sqrt[3] = { 0 }; //Сумма квадратов мгновенных значений ацп
 
 uint8_t adc_diff_sqrt[3] = { 0 }; //Квадрат разности мгновенных значения ацп
 int32_t summ_adc_diff_sqrt[3] = { 0 }; //Сумма квадратов разности мгновенных значений ацп
 
-uint32_t saved_summ_adc_sqrt[6] = { 0 }; //Сохраненная сумма квадратов мгновенных значений ацп
+uint32_t saved_summ_adc_sqrt[3] = { 0 }; //Сохраненная сумма квадратов мгновенных значений ацп
 int32_t saved_summ_adc_diff_sqrt[3] = { 0 }; //Сохраненная сумма квадратов разности мгновенных значений напряжения фаз
 
 /* Расчет действующего значения напряжения */
 float u_rms[3] = { 0.0 }; //Действующее значение напряжения
 
-uint32_t prev_saved_summ_adc_sqrt[6] = { 0 }; //Предыдущая сумма квадратов мгновенных значений напряжения
+uint32_t prev_saved_summ_adc_sqrt[3] = { 0 }; //Предыдущая сумма квадратов мгновенных значений напряжения
 
 /* Расчет действующего значения тока */
 float i_rms[3] = { 0.0 }; //Действующее значение тока
 
 /* Расчет действующего линейного значения напряжения фаз */
-float u_l[3] = { 0.0 }; //Действующее линейное значение напряжение фазы
+float u_l[3] = { 0.0, 0.0, 0.0 }; //Действующее линейное значение напряжение фазы
+
 int32_t prev_saved_summ_adc_diff_sqrt[3] = { 0 }; //Предыдущая сумма квадратов разности мгновенных значений напряжения фаз
 
 uint16_t num_of_meas[6] = { 0 }; //Количество измерений
@@ -95,11 +96,18 @@ float freq_view[3] = { 0 }; //Вывод частоты
 
 uint16_t freq_hits_num = 0; //Количество совпадений частоты
 
-uint8_t flag_calc = 0; //Флаг разрешения вычисления
+uint8_t flag_calc = 0; //Флаг разрешения вычисления напряжений
 
 int32_t period = 0;
 int32_t pulse_width = 0;
 float fr = 0; //Вывод частоты
+
+
+
+
+
+
+uint8_t flag = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -204,10 +212,9 @@ void adc_processing (uint8_t phase)
 	  flag_dead_zone &= ~(1 << phase); //Сбрасываем флаг запрещенной зоны
 
 	  /* Сохраняем вычисленные значения если не ведутся расчеты */
-	  if (!(flag_calc & (1 << phase)))
-	    {
+	  //if (!(flag_calc & (1 << phase)))
+	    //{
 	      flag_calc |= (1 << phase); //Разрешаем расчет
-
 	      saved_summ_adc_sqrt[phase] = summ_adc_sqrt[phase];
 	      freq_num_of_meas_curr[phase] = freq_num_of_meas[phase];
 	      saved_num_of_meas[phase] = num_of_meas[phase];
@@ -215,7 +222,7 @@ void adc_processing (uint8_t phase)
 		{
 		  saved_summ_adc_diff_sqrt[phase] = summ_adc_diff_sqrt[phase];
 		}
-	    }
+	    //}
 	  /* Обнуляем значения вычисленные значения */
 	  summ_adc_sqrt[phase] = 0;
 	  num_of_meas[phase] = 0;
@@ -227,7 +234,7 @@ void adc_processing (uint8_t phase)
 	}
 
       /* Выхода из запрещенной зоны небыло */
-      if (!(flag_dead_zone & (1 << (phase + 3))))
+      else
 	{
 	  ++num_of_meas[phase];
 	  summ_adc_sqrt[phase] += adc_sqrt[phase];
@@ -240,6 +247,7 @@ void adc_processing (uint8_t phase)
   /* Если измерение меньше запрещенной зоны */
   else
     {
+      ++flag;
       flag_dead_zone |= (1 << phase);
       ++freq_num_of_meas[phase];
     }
@@ -249,6 +257,7 @@ void adc_processing (uint8_t phase)
 /* Расчет фазных и линейных напряжений */
 void calculation (uint8_t phase)
 {
+  ++flag;
   freq[phase] = MEASUREMENT_FREQUENCY / (freq_num_of_meas_curr[phase] + saved_num_of_meas[phase]);
 
   if (freq[phase] > FREQ_LIM_LOW && freq[phase] < FREQ_LIM_UPP)
@@ -260,7 +269,7 @@ void calculation (uint8_t phase)
 	}
       else
 	{
-	  i_rms[phase - 3] = (sqrt_my((saved_summ_adc_sqrt[phase] + prev_saved_summ_adc_sqrt[phase]) / (saved_num_of_meas[phase] + prev_saved_num_of_meas[phase]))) * CURRENT_COEFFICIENT;
+	  i_rms[phase] = (sqrt_my((saved_summ_adc_sqrt[phase] + prev_saved_summ_adc_sqrt[phase]) / (saved_num_of_meas[phase] + prev_saved_num_of_meas[phase]))) * CURRENT_COEFFICIENT;
 	}
     }
 
@@ -673,7 +682,6 @@ void HAL_ADC_ConvCpltCallback (ADC_HandleTypeDef *hadc)
   adc_sqrt[0] = (adc[0] - ZERO_AXIS) * (adc[0] - ZERO_AXIS);
   adc_sqrt[1] = (adc[1] - ZERO_AXIS) * (adc[1] - ZERO_AXIS);
   adc_sqrt[2] = (adc[2] - ZERO_AXIS) * (adc[2] - ZERO_AXIS);
-
   adc_sqrt[3] = (adc[3] - (ZERO_AXIS + 4)) * (adc[3] - (ZERO_AXIS + 4));
   adc_sqrt[4] = (adc[4] - (ZERO_AXIS + 7)) * (adc[4] - (ZERO_AXIS + 7));
   adc_sqrt[5] = (adc[5] - (ZERO_AXIS - 5)) * (adc[5] - (ZERO_AXIS - 5));
