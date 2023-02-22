@@ -236,9 +236,9 @@ void adc_processing (uint8_t phase)
 /* Расчет фазных и линейных напряжений */
 void calculation (uint8_t phase)
 {
-  freq[phase] = MEASUREMENT_FREQUENCY / (freq_num_of_meas_curr[phase] + saved_num_of_meas[phase]);
-  if (freq[phase] > FREQ_LIM_LOW && freq[phase] < FREQ_LIM_UPP)
-    {
+  //freq[phase] = MEASUREMENT_FREQUENCY / (freq_num_of_meas_curr[phase] + saved_num_of_meas[phase]);
+  //if (freq[phase] > FREQ_LIM_LOW && freq[phase] < FREQ_LIM_UPP)
+    //{
       if (phase < 3)
 	{
 	  u_rms[phase] = (sqrt_my((saved_summ_adc_sqrt[phase] + prev_saved_summ_adc_sqrt[phase]) / (saved_num_of_meas[phase] + prev_saved_num_of_meas[phase]))) * VOLTAGE_COEFFICIENT;
@@ -248,7 +248,7 @@ void calculation (uint8_t phase)
 	{
 	  i_rms[phase - 3] = 0.006173 * (sqrt_my((saved_summ_adc_sqrt[phase] + prev_saved_summ_adc_sqrt[phase]) / (saved_num_of_meas[phase] + prev_saved_num_of_meas[phase]))) + 0.0123457;
 	}
-    }
+    //}
   prev_saved_summ_adc_sqrt[phase] = saved_summ_adc_sqrt[phase];
   prev_saved_num_of_meas[phase] = saved_num_of_meas[phase];
   (phase < 3) ? (prev_saved_summ_adc_diff_sqrt[phase] = saved_summ_adc_diff_sqrt[phase]) : 0;
