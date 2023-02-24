@@ -76,22 +76,15 @@ uint16_t num_of_meas[6] = { 0 }; //Количество измерений
 uint16_t saved_num_of_meas[6] = { 0 }; //Текущее количество измерений
 uint16_t prev_saved_num_of_meas[6] = { 0 }; //Предыдущее количество измерений
 
-uint16_t freq_num_of_meas[6] = { 0 }; //Количество измерений для измерения частоты
-uint16_t freq_num_of_meas_curr[6] = { 0 }; //Текущее количество измерений для измерения частоты
-
 uint8_t flag_dead_zone = 0; //Флаг перехода измерения в мертвую зону
-
-uint8_t freq[6] = { 0 }; //Частота
 
 uint8_t flag_calc = 0; //Флаг разрешения вычисления
 
 uint8_t count_overflow = 0;
 uint8_t flag_fr = 0;
-float fr_1 = 0;
-float fr_2 = 0;
-float fr_3 = 0;
-float fr_mean = 0;
-
+uint32_t per = 0;
+uint32_t saved_per[3] = { 0 };
+float freq = 0;
 
 uint8_t flag_filter = 0;
 uint16_t m_1[6] = { 0 };
@@ -184,11 +177,6 @@ uint16_t sqrt_my (uint32_t L)
 }
 
 
-
-
-
-
-
 /* Обработка показаний ацп */
 void adc_processing (uint8_t phase)
 {
@@ -206,14 +194,12 @@ void adc_processing (uint8_t phase)
 	      flag_calc |= (1 << phase); //Разрешаем расчет
 
 	      saved_summ_adc_sqrt[phase] = summ_adc_sqrt[phase];
-	      freq_num_of_meas_curr[phase] = freq_num_of_meas[phase];
 	      saved_num_of_meas[phase] = num_of_meas[phase];
 	      (phase < 3) ? (saved_summ_adc_diff_sqrt[phase] = summ_adc_diff_sqrt[phase]) : 0;
 	    }
 	  /* Обнуляем значения вычисленные значения */
 	  summ_adc_sqrt[phase] = 0;
 	  num_of_meas[phase] = 0;
-	  freq_num_of_meas[phase] = 0;
 	  (phase < 3) ? (summ_adc_diff_sqrt[phase] = 0) : 0;
 	}
 
@@ -229,31 +215,52 @@ void adc_processing (uint8_t phase)
   else
     {
       flag_dead_zone |= (1 << phase);
-      ++freq_num_of_meas[phase];
     }
 }
 
 /* Расчет фазных и линейных напряжений */
 void calculation (uint8_t phase)
 {
-  //freq[phase] = MEASUREMENT_FREQUENCY / (freq_num_of_meas_curr[phase] + saved_num_of_meas[phase]);
-  //if (freq[phase] > FREQ_LIM_LOW && freq[phase] < FREQ_LIM_UPP)
-    //{
-      if (phase < 3)
-	{
-	  u_rms[phase] = (sqrt_my((saved_summ_adc_sqrt[phase] + prev_saved_summ_adc_sqrt[phase]) / (saved_num_of_meas[phase] + prev_saved_num_of_meas[phase]))) * VOLTAGE_COEFFICIENT;
-	  u_l[phase] = (sqrt_my((saved_summ_adc_diff_sqrt[phase] + prev_saved_summ_adc_diff_sqrt[phase]) / (saved_num_of_meas[phase] + prev_saved_num_of_meas[phase]))) * VOLTAGE_COEFFICIENT;
-	}
-      else
-	{
-	  i_rms[phase - 3] = 0.006173 * (sqrt_my((saved_summ_adc_sqrt[phase] + prev_saved_summ_adc_sqrt[phase]) / (saved_num_of_meas[phase] + prev_saved_num_of_meas[phase]))) + 0.0123457;
-	}
-    //}
+
+  if (phase < 3)
+    {
+      u_rms[phase] = (sqrt_my((saved_summ_adc_sqrt[phase] + prev_saved_summ_adc_sqrt[phase]) / (saved_num_of_meas[phase] + prev_saved_num_of_meas[phase]))) * VOLTAGE_COEFFICIENT;
+      u_l[phase] = (sqrt_my((saved_summ_adc_diff_sqrt[phase] + prev_saved_summ_adc_diff_sqrt[phase]) / (saved_num_of_meas[phase] + prev_saved_num_of_meas[phase]))) * VOLTAGE_COEFFICIENT;
+    }
+  else
+    {
+      i_rms[phase - 3] = 0.006173 * (sqrt_my((saved_summ_adc_sqrt[phase] + prev_saved_summ_adc_sqrt[phase]) / (saved_num_of_meas[phase] + prev_saved_num_of_meas[phase]))) + 0.0123457;
+    }
   prev_saved_summ_adc_sqrt[phase] = saved_summ_adc_sqrt[phase];
   prev_saved_num_of_meas[phase] = saved_num_of_meas[phase];
   (phase < 3) ? (prev_saved_summ_adc_diff_sqrt[phase] = saved_summ_adc_diff_sqrt[phase]) : 0;
 
   flag_calc &= ~(1 << phase);
+}
+
+
+void freq_calculation ()
+{
+  switch (flag_fr)
+    {
+    case 0:
+      flag_fr = 1;
+      saved_per[0] = per;
+
+      break;
+
+    case 1:
+      flag_fr = 2;
+      saved_per[1] = per;
+      break;
+
+    case 2:
+      flag_fr = 0;
+      saved_per[2] = per;
+
+      freq = 48000000.0 / ((saved_per[0] < saved_per[1]) ? ((saved_per[1] < saved_per[2]) ? saved_per[1] : ((saved_per[2] < saved_per[0]) ? saved_per[0] : saved_per[2])) : ((saved_per[0] < saved_per[2]) ? saved_per[0] : ((saved_per[2] < saved_per[1]) ? saved_per[1] : saved_per[2])));
+      break;
+    }
 }
 /* USER CODE END 0 */
 
@@ -294,12 +301,10 @@ int main(void)
   HAL_ADCEx_Calibration_Start(&hadc);
   HAL_ADC_Start_DMA(&hadc, (uint32_t *)adc, 6);
 
-  HAL_TIM_Base_Start(&htim15);
   HAL_TIM_Base_Start_IT(&htim15);
 
   HAL_TIM_Base_Start_IT(&htim3);
   HAL_TIM_IC_Start_IT(&htim3, TIM_CHANNEL_1);
-
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -318,16 +323,15 @@ int main(void)
 	  calculation (3);
 	}
       if (flag_calc & (1 << 4))
-      	{
+	{
 	  calculation (4);
-      	}
+	}
       if (flag_calc & (1 << 5))
-      	{
+	{
 	  calculation (5);
-      	}
+	}
 
-
-
+      freq_calculation();
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -352,7 +356,7 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.HSI14CalibrationValue = 16;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
-  RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL2;
+  RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL3;
   RCC_OscInitStruct.PLL.PREDIV = RCC_PREDIV_DIV2;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
@@ -591,6 +595,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOC_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1|GPIO_PIN_2, GPIO_PIN_RESET);
@@ -601,6 +606,16 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PB0 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI0_1_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI0_1_IRQn);
 
 }
 
@@ -676,6 +691,23 @@ void HAL_ADC_ConvCpltCallback (ADC_HandleTypeDef *hadc)
   HAL_ADC_Start_DMA (hadc, (uint32_t*) adc, 6);
 }
 
+
+void
+HAL_TIM_IC_CaptureCallback (TIM_HandleTypeDef *htim)
+{
+  if (htim->Instance == TIM3)
+    {
+      if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_1)
+	{
+	  per = HAL_TIM_ReadCapturedValue (&htim3, TIM_CHANNEL_1) + (65001 * count_overflow);
+	  count_overflow = 0;
+	  TIM3->CNT = 0;
+	}
+    }
+}
+
+
+/*
 void HAL_TIM_IC_CaptureCallback (TIM_HandleTypeDef *htim)
 {
   if (htim->Instance == TIM3)
@@ -686,28 +718,30 @@ void HAL_TIM_IC_CaptureCallback (TIM_HandleTypeDef *htim)
 	    {
 	    case 0:
 	      flag_fr = 1;
-	      fr_1 = 31936000.0/(HAL_TIM_ReadCapturedValue (&htim3, TIM_CHANNEL_1) + (64999 * count_overflow));
+	      saved_per[0] = HAL_TIM_ReadCapturedValue (&htim3, TIM_CHANNEL_1) + (65001 * count_overflow);
 	      count_overflow = 0;
 	      break;
 
 	    case 1:
 	      flag_fr = 2;
-	      fr_2 = 31936000.0/(HAL_TIM_ReadCapturedValue (&htim3, TIM_CHANNEL_1) + (64999 * count_overflow));
+	      saved_per[1] = HAL_TIM_ReadCapturedValue (&htim3, TIM_CHANNEL_1) + (65001 * count_overflow);
 	      count_overflow = 0;
 	      break;
 
 	    case 2:
 	      flag_fr = 0;
-	      fr_3 = 31936000.0/(HAL_TIM_ReadCapturedValue (&htim3, TIM_CHANNEL_1) + (64999 * count_overflow));
+	      saved_per[2] = HAL_TIM_ReadCapturedValue (&htim3, TIM_CHANNEL_1) + (65001 * count_overflow);
 	      count_overflow = 0;
 
-	      fr_mean = (fr_1 < fr_2) ? ((fr_2 < fr_3) ? fr_2 : ((fr_3 < fr_1) ? fr_1 : fr_3)) : ((fr_1 < fr_3) ? fr_1 : ((fr_3 < fr_2) ? fr_2 : fr_3));
+	      freq = 48000000.0 / ((saved_per[0] < saved_per[1]) ? ((saved_per[1] < saved_per[2]) ? saved_per[1] : ((saved_per[2] < saved_per[0]) ? saved_per[0] : saved_per[2])) : ((saved_per[0] < saved_per[2]) ? saved_per[0] : ((saved_per[2] < saved_per[1]) ? saved_per[1] : saved_per[2])));
 	      break;
 	    }
 	  TIM3->CNT = 0;
 	}
     }
 }
+*/
+
 
 void HAL_TIM_PeriodElapsedCallback (TIM_HandleTypeDef *htim)
 {
